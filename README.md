@@ -249,6 +249,102 @@ export const bookingJanji = (
 
 ---
 
+## Decision Tree: Ke Mana Suatu Business Rule Pergi?
+
+Ini bagian paling penting. Buka `bisnisrule.md`, ambil satu aturan, tanya:
+
+```
+Aturan ini butuh data dari:
+├── SATU field, gak perlu tau konteks lain?         → Value Object
+├── BEBERAPA field dalam 1 entity/aggregate?        → Aggregate Root
+├── BEBERAPA aggregate berbeda?                      → Domain Service
+├── Identity entity itu sendiri?                     → Entity (factory)
+└── Gak ada hubungannya sama domain?                 → Application Layer (luar scope)
+```
+
+Berikut contoh-contoh dari project ini, lengkap dengan **alasan kenaga** bukan yang lain.
+
+---
+
+### "Nama gak boleh kosong, max 100" → Value Object (`PatientName`)
+
+| Ditanya | Jawab |
+|---------|-------|
+| **Kenapa bukan Entity?** | Nama gak punya identity. "Andi" tetaplah "Andi" di mana pun — ngasih ID ke nama itu mubazir. |
+| **Kenapa bukan Aggregate Root?** | Rule ini cuma validasi 1 field. Gak perlu tau status janji, gak perlu tau pasien lain, gak perlu konsistensi transaksional. |
+| **Kenapa bukan Domain Service?** | Gak perlu data dari aggregate lain. Cuma terima string → validasi → return. |
+
+Contoh rule mirip: `Email`, `Phone`, `TglJanji`, `Slot`, `Alasan`, `Diagnosis`.
+
+---
+
+### "Konfirmasi minimal H-1" → Aggregate Root (`konfirmasiJanji`)
+
+| Ditanya | Jawab |
+|---------|-------|
+| **Kenapa bukan Value Object?** | Rule ini butuh **2 hal**: `tgl` (kapan janji-nya) DAN `status` (current state). Dua-duanya bagian dari aggregate. VO cuma pegang 1 nilai, gak bisa koordinasi antar field. |
+| **Kenapa bukan Entity?** | Ini invariant yang melibatkan **cluster** — `tgl` dan `status` harus konsisten. Kalo rule ini ditaruh terpisah di entity lain, gak ada jaminan konsistensi. |
+| **Kenapa bukan Domain Service?** | Rule ini cuma butuh data dari 1 aggregate (Janji). Gak perlu tau Pasien atau Dokter. Makanya cukup di root aggregate-nya sendiri. |
+
+Pola umum: **Kalo rule-nya butuh cek beberapa field dalam 1 aggregate untuk jaga konsistensi, itu Aggregate Root.**
+
+Contoh rule mirip: `batalJanji` (cek status + wajib alasan), `jadwalUlangJanji` (cek status + hitungReschedule).
+
+---
+
+### "Booking: Pasien aktif? Dokter aktif? Slot tabrakan? Maks 10/hari?" → Domain Service (`bookingJanji`)
+
+| Ditanya | Jawab |
+|---------|-------|
+| **Kenapa bukan Value Object?** | Ini butuh **4 sumber data berbeda** — VO cuma pegang 1 nilai. |
+| **Kenapa bukan Entity?** | Entity mana? Janji? Janji belum ada. Pasien? Pasien gak tau jadwal dokter. Dokter? Dokter gak tau status pasien. Gak ada entity yang punya semua data ini. |
+| **Kenapa bukan Aggregate Root?** | Kalo ditaruh di Janji, Janji musti tau data Pasien & Dokter — itu bocor boundary. Ingat: aggregate cuma pegang **ID** entity lain, bukan object-nya. Tapi validasi ini butuh object utuh (`pasien.aktif`, `dokter.aktif`). |
+
+Pola umum: **Kalo rule-nya butuh object utuh dari beberapa aggregate berbeda, itu Domain Service.**
+
+---
+
+### "Status janji: Terjadwal → Dikonfirmasi → Dimulai → Selesai" → Value Object (`StatusJanji`)
+
+| Ditanya | Jawab |
+|---------|-------|
+| **Kenapa bukan Entity?** | `Terjadwal` tetaplah `Terjadwal`, gak perlu ID. Status "Terjadwal" di Janji A dan "Terjadwal" di Janji B ya status yang sama. |
+| **Kenapa bukan Aggregate Root?** | Transisi state (`bolehTransisi`) adalah **pengetahuan tentang state itu sendiri** — gak perlu tau data aggregate. "Apakah Dikonfirmasi bisa ke Batal?" jawabannya iya, di Janji mana pun. |
+| **Kenapa bukan Domain Service?** | Sama: gak perlu data aggregate lain. Cuma butuh `_tag` asal dan `_tag` tujuan. |
+
+Penting: `StatusJanji` ada di VO karena **rule transisi state itu universal** — berlaku untuk semua Janji, gak peduli pasien-nya siapa, dokternya siapa, tanggalnya kapan. Tapi pengecekan `bolehTransisi` **dipanggil** di Aggregate Root (lihat `konfirmasiJanji`, `batalJanji`, dll) karena root-lah yang nentuin kapan transisi terjadi.
+
+---
+
+### "Reschedule maksimal 1 kali" → campuran VO + Aggregate Root
+
+| Bagian rule | Taruh di | Kenapa? |
+|-------------|----------|---------|
+| `hitungReschedule >= 1` berarti udah pernah | **VO** (`HitungReschedule`) | Nilai counter itu data, validasi format-nya milik VO |
+| "Status harus Terjadwal/Dikonfirmasi" | **Aggregate Root** (`jadwalUlangJanji`) | Butuh tau current state dari Janji |
+| "Slot baru harus available" | **Domain Service** (`jadwalUlang`) | Butuh compare sama janji lain (aggregate berbeda) |
+
+**1 aturan bisnis bisa terpecah ke beberapa pattern.** Kuncinya: pecah berdasarkan **siapa yang punya data** yang diperlukan.
+
+---
+
+### Ringkasan Decision Tree
+
+```
+┌─ Apakah rule ini cuma validasi 1 nilai? ───→ Value Object
+│   (contoh: format nama, regex email, range jam)
+│
+└─ Apakah rule ini butuh >1 field?
+   │
+   ├─ Apakah field-field itu dalam 1 cluster? ──→ Aggregate Root
+   │   (contoh: "H-1" butuh tgl+status, "batal" butuh status+alasan)
+   │
+   └─ Apakah field-field itu dari cluster berbeda? ──→ Domain Service
+       (contoh: booking butuh Pasien+Dokter+Janji[])
+```
+
+---
+
 ## Workflow: Dari Meeting Notes ke Kode
 
 Buka **`bisnisrule.md`** — itu catatan meeting asli. Bahasa domain expert (Bu Sari), belum di-structure.
