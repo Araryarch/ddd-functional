@@ -1,8 +1,8 @@
 import { daftarPasien, suspendPasien } from './domain/entities/pasien'
 import { buatDokter } from './domain/entities/dokter'
 import { bookingJanji } from './domain/domain-services/booking'
-import { jadwalUlang } from './domain/domain-services/penjadwalan-ulang'
-import { catatRM } from './domain/domain-services/pencatatan-rm'
+import { jadwalUlang } from './domain/domain-services/reschedule'
+import { catatRM } from './domain/domain-services/catat-rekam-medis'
 import { konfirmasiJanji, mulaiJanji, selesaiJanji, batalJanji, noShowJanji } from './domain/aggregates/janji-root'
 import { isOk, isFail } from './domain/types'
 

@@ -1,5 +1,5 @@
 import { Result, ok, isFail, ID } from "../types";
-import { PatientName, Email, Phone } from "../value-objects/pasien";
+import { PatientName, Email, Phone } from "../value-objects/profil-pasien";
 
 export type Pasien = Readonly<{
   id: ID;

@@ -17,18 +17,18 @@ npx tsc --noEmit       # typecheck
 src/domain/
 ├── types.ts                        # Result<T,E>, ID
 ├── value-objects/                  # self-validating, immutable, tanpa identity
-│   ├── pasien.ts
+│   ├── profil-pasien.ts
 │   └── janji.ts
 ├── entities/                       # punya identity (ID)
-│   ├── pasien.ts
+│   ├── profil-pasien.ts
 │   ├── dokter.ts
 │   └── rekam-medis.ts
 ├── aggregates/                     # entry point cluster, jaga invariant bisnis
 │   └── janji-root.ts
 └── domain-services/                # logika lintas-aggregate
     ├── booking.ts
-    ├── penjadwalan-ulang.ts
-    └── pencatatan-rm.ts
+    ├── reschedule.ts
+    └── catat-rekam-medis.ts
 ```
 
 ---
@@ -55,7 +55,7 @@ Daripada mutasi object (yang rawan bug karena reference sharing), kita **buat ba
 
 Kalo validasi diserahkan ke pemakai, tiap kali ada kode baru yang pake `PatientName`, validasinya harus diulang. Lama-lama bocor. Makanya VO validasi **diri sendiri** di factory function, pake `Result<T,E>`.
 
-### Contoh: `src/domain/value-objects/pasien.ts:3-8`
+### Contoh: `src/domain/value-objects/profil-pasien.ts:3-8`
 
 ```typescript
 export type PatientName = string & { readonly __brand: 'PatientName' }
@@ -71,9 +71,9 @@ Ada **9 Value Objects** di project ini:
 
 | VO | File | Baris |
 |----|------|-------|
-| `PatientName` | `value-objects/pasien.ts` | 3-8 |
-| `Email` | `value-objects/pasien.ts` | 11-18 |
-| `Phone` | `value-objects/pasien.ts` | 21-26 |
+| `PatientName` | `value-objects/profil-pasien.ts` | 3-8 |
+| `Email` | `value-objects/profil-pasien.ts` | 11-18 |
+| `Phone` | `value-objects/profil-pasien.ts` | 21-26 |
 | `TglJanji` | `value-objects/janji.ts` | 3-8 |
 | `Slot` | `value-objects/janji.ts` | 11-18 |
 | `Alasan` | `value-objects/janji.ts` | 23-27 |
@@ -244,8 +244,8 @@ export const bookingJanji = (
 | Service | File | Baris | Melibatkan |
 |---------|------|-------|------------|
 | `bookingJanji` | `domain-services/booking.ts` | 7-45 | Pasien + Dokter + Janji[] |
-| `jadwalUlang` | `domain-services/penjadwalan-ulang.ts` | 7-30 | Janji + Janji[] |
-| `catatRM` | `domain-services/pencatatan-rm.ts` | 5-13 | Janji + RekamMedis |
+| `jadwalUlang` | `domain-services/reschedule.ts` | 7-30 | Janji + Janji[] |
+| `catatRM` | `domain-services/catat-rekam-medis.ts` | 5-13 | Janji + RekamMedis |
 
 ---
 
@@ -381,7 +381,7 @@ Baca lagi, kali ini garisbawahi kata benda yang punya aturan:
 
 Ciri khas VO: **nilai** (bukan identity), **self-validating** (pake `Result<T,E>`), **immutable**.
 
-**Output:** file `value-objects/pasien.ts` dan `value-objects/janji.ts`.
+**Output:** file `value-objects/profil-pasien.ts` dan `value-objects/janji.ts`.
 
 ---
 
@@ -456,10 +456,10 @@ Dari catatan:
 | Aturan | Butuh data dari | Jadi service |
 |--------|----------------|--------------|
 | "Pasien aktif? Dokter aktif? Slot tabrakan? Maks 10/hari?" | Pasien + Dokter + Janji[] | `booking.ts` |
-| "Slot baru available? Udah pernah reschedule?" | Janji + Janji[] | `penjadwalan-ulang.ts` |
-| "Cuma boleh catat kalo Selesai" | Janji + RekamMedis | `pencatatan-rm.ts` |
+| "Slot baru available? Udah pernah reschedule?" | Janji + Janji[] | `reschedule.ts` |
+| "Cuma boleh catat kalo Selesai" | Janji + RekamMedis | `catat-rekam-medis.ts` |
 
-**Output:** file `domain-services/booking.ts`, `penjadwalan-ulang.ts`, `pencatatan-rm.ts`.
+**Output:** file `domain-services/booking.ts`, `reschedule.ts`, `catat-rekam-medis.ts`.
 
 ---
 
@@ -469,7 +469,7 @@ Buka tiap file di `src/domain/`, cocokin:
 
 | Aturan di `bisnisrule.md` | Implementasi |
 |---------------------------|-------------|
-| "Nama gak boleh kosong, max 100" | `value-objects/pasien.ts:4-8` |
+| "Nama gak boleh kosong, max 100" | `value-objects/profil-pasien.ts:4-8` |
 | "Tanggal harus future" | `value-objects/janji.ts:7` |
 | "Jam 08.00-17.00" | `value-objects/janji.ts:12-13` |
 | "Pasien suspended gabisa booking" | `domain-services/booking.ts:15` |
@@ -478,7 +478,7 @@ Buka tiap file di `src/domain/`, cocokin:
 | "Konfirmasi minimal H-1" | `aggregates/janji-root.ts:55` (`bolehKonfirmasi`) |
 | "Batal wajib alasan, sebelum Dimulai" | `aggregates/janji-root.ts:78-80` |
 | "Reschedule max 1x, status Terjadwal/Dikonfirmasi" | `aggregates/janji-root.ts:96-99` |
-| "Selesai baru boleh catat RM" | `domain-services/pencatatan-rm.ts:8` |
+| "Selesai baru boleh catat RM" | `domain-services/catat-rekam-medis.ts:8` |
 
 ---
 
@@ -519,7 +519,7 @@ Output 12 skenario — ✅ sukses, ❌ expected error (business rule menolak sep
 | Batal dengan alasan | ✅ | `aggregates/janji-root.ts:75` |
 | Reschedule 1x | ✅ | `aggregates/janji-root.ts:92` |
 | NoShow | ✅ | `aggregates/janji-root.ts:85` |
-| Catat rekam medis | ✅ | `domain-services/pencatatan-rm.ts:5` |
+| Catat rekam medis | ✅ | `domain-services/catat-rekam-medis.ts:5` |
 | Pasien non-aktif ditolak booking | ❌ (ditolak) | `domain-services/booking.ts:15` |
 | Reschedule 2x ditolak | ❌ (ditolak) | `aggregates/janji-root.ts:96` |
 
