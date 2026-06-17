@@ -37,7 +37,23 @@ src/domain/
 
 Ciri: **tanpa identity**, **immutable**, **self-validating**.
 
-Dua VO dengan nilai sama dianggap sama. Setiap factory function melakukan validasi bisnis.
+### Kenapa tanpa identity?
+
+> "Nama Andi" tetaplah "Nama Andi" di mana pun — gak perlu tracking ID.
+
+Kalo `PatientName("Andi")` dan `PatientName("Andi")` lain, dua duanya ya nama yang sama. Gak ada bedanya. Ngasih ID ke sesuatu yang dibedakan cuma dari nilainya itu **redundan** dan bikin kode tambah ribet.
+
+### Kenapa immutable?
+
+> "Nama Andi" kalo diganti jadi "Budi" bukan lagi nama yang sama — itu nama baru.
+
+Daripada mutasi object (yang rawan bug karena reference sharing), kita **buat baru** tiap kali nilai berubah. Ini selaras sama konsep matematis: `2 + 3 = 5` — nilai 2 dan 3 gak berubah, yang ada hasil baru.
+
+### Kenapa self-validating?
+
+> Nama pasien gak boleh kosong → aturan itu **milik** PatientName, bukan milik si pemakai.
+
+Kalo validasi diserahkan ke pemakai, tiap kali ada kode baru yang pake `PatientName`, validasinya harus diulang. Lama-lama bocor. Makanya VO validasi **diri sendiri** di factory function, pake `Result<T,E>`.
 
 ### Contoh: `src/domain/value-objects/pasien.ts:3-8`
 
@@ -71,7 +87,34 @@ Ada **9 Value Objects** di project ini:
 
 ## Entity
 
-Ciri: **punya identity (ID)**, bisa berubah, dibandingkan pakai ID.
+Ciri: **identity immutable, atribut mutable**, **dibandingkan pakai ID**.
+
+### Kenapa identity immutable?
+
+> `id: ID` — identity adalah **satu-satunya yang gak pernah berubah**. Kalo ID berubah, itu bukan pasien yang sama lagi.
+
+Di kode: `id` pake `ID` (branded type). Gak ada fungsi `gantiId()` — memang sengaja gak dibuat.
+
+Lihat `entities/pasien.ts:4-10`:
+```
+id: ID               ← IMMUTABLE — gak bisa diganti seumur hidup
+nama: PatientName    ← bisa berubah
+email: Email         ← bisa berubah
+telepon: Phone       ← bisa berubah
+aktif: boolean       ← bisa berubah
+```
+
+### Kenapa atribut bisa berubah?
+
+> Pasien ganti nomor HP, tapi tetep pasien yang sama.
+
+Atribut non-ID bisa berubah sepanjang siklus hidup. Tapi perubahannya lewat **fungsi explicit** (bukan setter): `suspendPasien(p)` return object baru dengan `aktif: false`. Immutable secara object, mutable secara semantik.
+
+### Kenapa dibandingkan pakai ID?
+
+> Kalo ada dua object Pasien dengan data sama, belum tentu pasien yang sama — bisa jadi dua pasien beda yang kebetulan namanya sama.
+
+Perbandingan Entity pake ID (`a.id === b.id`), bukan pake nilai. Dua object Pasien dengan field identik tapi ID beda ya berarti dua pasien berbeda.
 
 ### Contoh: `src/domain/entities/pasien.ts:4-10`
 
@@ -111,6 +154,27 @@ idDokter: ID    // ← bukan object Dokter
 
 Ciri: **entry point cluster**, **jaga transactional boundary**, **referensi antar aggregate via ID**.
 
+### Kenapa entry point cluster?
+
+> Setiap operasi janji (booking, konfirmasi, batal) harus lewat sini — gak boleh ada yang ubah status janji di luar.
+
+Aggregate root adalah **gerbang satu-satunya** ke dalam cluster. Kalo ada kode lain yang langsung mutasi `status` tanpa lewat `konfirmasiJanji()`, aturan bisnis bisa dilewati. Semua akses harus melalui root.
+
+### Kenapa jaga transactional boundary?
+
+> "Booking gagal karena slot tabrakan" — kalo slot udah terisi, seluruh janji gagal. Gak boleh ada janji setengah jadi.
+
+Dalam 1 transaksi, aggregate root harus menjamin semua invariant di dalam cluster konsisten. Kalo ada satu aturan yang dilanggar, **semua** perubahan ditolak (return `fail`), bukan cuma sebagian.
+
+### Kenapa referensi via ID, bukan object?
+
+> `Janji` pegang `idPasien: ID`, bukan `pasien: Pasien`.
+
+Alasannya:
+1. **Boundary disiplin** — aggregate cuma tanggung jawab sama data di cluster-nya sendiri. Data Pasien urusan aggregate Pasien.
+2. **Performance** — kalo pegang object, loading Janji berarti ikut loading Pasien, loading Dokter, loading... ujung-ujungnya load seluruh database.
+3. **Consistency** — data Pasien bisa berubah tanpa pengaruh Janji. Kalo Janji pegang reference ke object, bisa stale.
+
 ### Contoh: `src/domain/aggregates/janji-root.ts:18-26`
 
 ```typescript
@@ -143,7 +207,21 @@ Lihat `bolehTransisi` di `value-objects/janji.ts:64-73` untuk aturan state machi
 
 ## Domain Service
 
-Ciri: **stateless**, **melibatkan multiple aggregate**, operasi bisnis yang gak cocok di Entity/VO.
+Ciri: **stateless**, **melibatkan multiple aggregate**.
+
+### Kenapa perlu Domain Service? Kenapa gak taruh di Entity aja?
+
+> Booking perlu cek: Pasien aktif? Dokter aktif? Slot tabrakan? Maks 10/hari?
+
+Aturan ini melibatkan **4 hal berbeda**: Pasien, Dokter, `Janji[]` (milik dokter), `Janji[]` (milik pasien). Kalo validate di Entity Janji, Janji harus tau data Pasien & Dokter — itu melanggar dependency. Kalo taruh di Pasien, Pasien harus tau data Janji — juga melanggar.
+
+Domain Service adalah **fungsi stateless** yang jadi "wasit": dia terima data dari berbagai aggregate, validasi, lalu delegasi pembentukan Janji ke aggregate root (`buatJanji`).
+
+### Kenapa stateless?
+
+> `bookingJanji(...)` gasuka nyimpen state. Dia terima input → proses → return hasil. Panggil 2x dengan argumen sama → hasilnya sama.
+
+Kalo domain service punya state, dia jadi "setengah entity" — bikin bingung siapa yang tanggung jawab apa. State domain adalah milik Entity dan Aggregate Root.
 
 ### Contoh: `src/domain/domain-services/booking.ts:7-45`
 
