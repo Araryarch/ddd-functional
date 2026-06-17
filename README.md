@@ -104,6 +104,8 @@ telepon: Phone       ← bisa berubah
 aktif: boolean       ← bisa berubah
 ```
 
+> **Catatan:** pake `Readonly<{...}>` aja, bukan `Object.freeze()`. Karena kode ini functional — tiap "ubah" selalu return object baru, bukan mutasi object lama. `Readonly` ngasih **compile-time protection** (kebaca pas ngetik). `Object.freeze()` cuma nambah overhead runtime tanpa manfaat karena kode gak pernah mutasi. Tapi kalo ada developer lain yang ngerjain dan dikhawatirkan sembarangan mutasi, `Object.freeze()` bisa ditambahin lapisan ke-2.
+
 ### Kenapa atribut bisa berubah?
 
 > Pasien ganti nomor HP, tapi tetep pasien yang sama.
